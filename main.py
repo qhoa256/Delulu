@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 import google.generativeai as genai
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
@@ -41,7 +41,7 @@ class Conversation(Base):
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# Pydantic model for request
+# Sửa lại Pydantic model cho chat request
 class ChatRequest(BaseModel):
     user_id: str
     session_id: str
@@ -53,14 +53,24 @@ class ImageRequest(BaseModel):
     session_id: str
     prompt: Optional[str] = "Describe this image"
 
+# Thêm hàm kiểm tra định dạng file
+def is_valid_image(filename: str) -> bool:
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+    return any(filename.lower().endswith(ext) for ext in valid_extensions)
+
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(
+    user_id: str = Form(...),
+    session_id: str = Form(...),
+    text: str = Form(...),
+    image: Optional[UploadFile] = File(None)
+):
     try:
         # Lấy context từ các tin nhắn trước đó
         db = SessionLocal()
         previous_messages = db.query(Conversation).filter(
-            Conversation.user_id == request.user_id,
-            Conversation.session_id == request.session_id
+            Conversation.user_id == user_id,
+            Conversation.session_id == session_id
         ).order_by(Conversation.created_at.desc()).all()
 
         # Tạo conversation history
@@ -72,7 +82,7 @@ async def chat(request: ChatRequest):
             ])
         
         # Thêm tin nhắn hiện tại
-        conversation_history.append({"role": "user", "content": request.text})
+        conversation_history.append({"role": "user", "content": text})
         
         # Tạo prompt với context
         system_prompt = """You are a helpful AI assistant. Please provide concise and direct responses.
@@ -84,7 +94,7 @@ async def chat(request: ChatRequest):
         Conversation History:
         {' '.join([f"{msg['role']}: {msg['content']}" for msg in conversation_history[:-1]])}
         
-        Current question: {request.text}
+        Current question: {text}
         """
 
         # Configure generation parameters
@@ -95,18 +105,51 @@ async def chat(request: ChatRequest):
             "max_output_tokens": 200,
         }
 
-        # Get response from Gemini
-        response = model.generate_content(
-            full_prompt,
-            generation_config=generation_config
-        )
+        # Xử lý response dựa trên việc có image hay không
+        if image and image.filename:
+            try:
+                # Kiểm tra định dạng file
+                if not is_valid_image(image.filename):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid image format. Supported formats: jpg, jpeg, png, gif, bmp, webp"
+                    )
+
+                # Đọc nội dung file ảnh
+                image_content = await image.read()
+                
+                # Kiểm tra xem file có nội dung không
+                if not image_content:
+                    raise HTTPException(status_code=400, detail="Empty image file")
+
+                # Sử dụng vision model nếu có ảnh
+                vision_model = genai.GenerativeModel('gemini-2.0-flash')
+                response = vision_model.generate_content([
+                    full_prompt,
+                    {
+                        "mime_type": image.content_type,
+                        "data": image_content
+                    }
+                ])
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Error processing image: {str(e)}"
+                )
+        else:
+            # Sử dụng model text nếu không có ảnh
+            response = model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
+            
         response_text = response.text
 
         # Lưu conversation mới với history
         conversation = Conversation(
-            user_id=request.user_id,
-            session_id=request.session_id,
-            text=request.text,
+            user_id=user_id,
+            session_id=session_id,
+            text=text,
             response=response_text,
             conversation_history=str(conversation_history)
         )
@@ -115,13 +158,15 @@ async def chat(request: ChatRequest):
         db.close()
 
         return {
-            "user_id": request.user_id,
-            "session_id": request.session_id,
+            "user_id": user_id,
+            "session_id": session_id,
             "response": response_text
         }
     except Exception as e:
         if 'db' in locals():
             db.close()
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze-image")
