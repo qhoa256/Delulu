@@ -11,7 +11,7 @@ def view_conversations():
     db = SessionLocal()
     try:
         # Query all conversations
-        result = db.execute(text("SELECT * FROM conversations"))
+        result = db.execute(text("SELECT * FROM conversations WHERE user_id = 'user123'"))
         
         print("\n=== Conversations in Database ===")
         for row in result:

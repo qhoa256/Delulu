@@ -1,6 +1,6 @@
 import requests
 
-url = "https://aitools.ptit.edu.vn/nho/chat"
+url = "http://localhost:8000/chat/"
 headers = {
     "Content-Type": "application/json"
 }
