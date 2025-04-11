@@ -99,7 +99,7 @@ async def chat(
         # Prompt hệ thống
         system_prompt = (
             "You are a helpful AI assistant. Please provide concise and direct responses. "
-            "Use the conversation history to maintain context and provide relevant answers."
+            "Use the conversation history to maintain context and provide relevant answers. IMPORTANT: Answer in Vietnamese"
         )
 
         # Ghép conversation_history vào full_prompt
@@ -218,7 +218,7 @@ async def analyze_image(
         
         # Tạo prompt với context
         system_prompt = """You are a helpful AI assistant. Please provide concise and direct responses.
-        Use the conversation history to maintain context and provide relevant answers."""
+        Use the conversation history to maintain context and provide relevant answers. IMPORTANT: Answer in Vietnamese"""
         
         full_prompt = f"""
         System: {system_prompt}
